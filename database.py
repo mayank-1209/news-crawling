@@ -79,6 +79,7 @@ class Content(Base):
     id = Column(Integer, primary_key=True, index=True)
     url_id = Column(Integer, ForeignKey("scraped_urls.id"), unique=True, index=True)
     title = Column(String(500))
+    body_description = Column(Text)
     body_text = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 

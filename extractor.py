@@ -1,4 +1,5 @@
 from bs4 import BeautifulSoup
+from markdownify import markdownify as md
 
 def extract_hindi_news18(soup: BeautifulSoup) -> dict:
     """Extraction rules specifically for hindi.news18.com"""
@@ -42,14 +43,31 @@ def extract_aajtak(soup: BeautifulSoup) -> dict:
         if first_img:
             image = first_img.get("src", "")
 
+        # article = soup.find("div", class_="container story-container")
+        # if article:
+        #     texts = []
+        #     for tag in article.find_all(["h2", "p"]):
+        #         texts.append(tag.get_text(strip=True))
+        #         content = "\n\n".join(texts)
+        #         # print(content)
+        # return {"title": title, "image": image, "content": content}
+
     article = soup.find("div", class_="container story-container")
+    content =""
+    
     if article:
-        texts = []
-        for tag in article.find_all(["h2", "p"]):
-            texts.append(tag.get_text(strip=True))
-            content = "\n\n".join(texts)
-            # print(content)
-    return {"title": title, "image": image, "content": content}
+        content = "\n\n".join(
+        md(str(tag), heading_style="ATX").strip()    
+        # tag.get_text(" ", strip=True)
+        for tag in article.find_all(["h2", "p"])
+        if tag.get_text(strip=True)
+    )
+    return {"title": title, "image": image, "content": content}    
+    
+    # if article:
+    #     content = md(str(article), heading_style="ATX", strip=['script', 'style'])        
+    #     content = "\n".join([line for line in content.splitlines() if line.strip()])
+    # return {"title": title, "image": image, "content": content}      
 
 def extract_new18(soup: BeautifulSoup) -> dict:
     """Extraction rules specifically for news18.com"""
@@ -78,7 +96,8 @@ def extract_new18(soup: BeautifulSoup) -> dict:
 
     if article:
         content = "\n\n".join(
-        tag.get_text(" ", strip=True)
+        md(str(tag), heading_style="ATX").strip()    
+        # tag.get_text(" ", strip=True)
         for tag in article.find_all(["h2", "p"])
         if tag.get_text(strip=True)
     )

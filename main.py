@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from crawler import fetch_and_parse_sitemap, get_sitemap_from_robots, store_urls_in_db
 from database import ContentLanguage, Language, SessionLocal, Domain, ScrapedURL, Content, Media
 from parser import get_extractor_for_url
+from rephraser import rephrase_markdown
 
 app = FastAPI()
 
@@ -43,6 +44,39 @@ def detect_article_language(text: str) -> str:
 
     except LangDetectException:
         return "unknown"      
+
+def rephrase_articles_task(db: Session, text: str):
+    print(f"Starting rephrasing for articles...")
+    
+    # Fetch content that has NOT been rephrased yet
+    # pending_content = (
+    #     db.query(Content)
+    #     .filter(Content.is_rephrased == False)
+    #     .filter(Content.body_text != "")
+    #     .limit(text)
+    #     .all()
+    # )
+
+    # if not pending_content:
+    #     print("No articles pending rephrasing.")
+    #     return
+
+    # for article in pending_content:
+    #     print(f"Rephrasing article ID: {article.id}...")
+        
+        # Pass the original Markdown to the AI
+    new_markdown = rephrase_markdown(text)
+    print(new_markdown)
+        
+        # if new_markdown:
+        #     # Save the result and mark it as done
+        #     article.rephrased_text = new_markdown
+        #     article.is_rephrased = True
+            
+        #     db.commit()
+        #     print(f"Successfully rephrased and saved article ID: {article.id}")
+        # else:
+        #     print(f"Failed to rephrase article ID: {article.id}")        
 
 def crawl_website_task(domain: str, db: Session):
     print(f"Starting crawl for {domain}...")
@@ -124,6 +158,7 @@ def scrape_articles_task(db: Session,  batch_size=None, url=None):
             new_content = Content(
                 url_id=item.id, 
                 title=title[:500], 
+                body_description=content[:600],
                 body_text=content
             )
 
@@ -223,3 +258,18 @@ async def trigger_content_scraping(
         "message": f"Started background task to scrape up to {batch_size} articles.",
         "status": "Accepted"
     }
+
+
+@app.post("/rephrase-content/")
+async def trigger_rephrasing(
+    background_tasks: BackgroundTasks, 
+    text: str, 
+    db: Session = Depends(get_db)
+):
+    """Triggers the AI to rewrite scraped articles."""
+    background_tasks.add_task(rephrase_articles_task, db, text)
+    
+    return {
+        "message": f"Started background task to rephrase up to articles.",
+        "status": "Accepted"
+    }    
