@@ -1,5 +1,4 @@
-from typing import Optional
-
+import asyncio
 from bs4 import BeautifulSoup
 # from charset_normalizer import detect
 from langdetect import detect
@@ -23,61 +22,71 @@ def get_db():
     finally:
         db.close()
 
-# def detect_article_language(text: str) -> str:
-#     """Safely detects language code (e.g., 'en', 'hi'). Returns 'unknown' if it fails."""
-#     try:
-#         # Langdetect needs a minimum amount of text to be accurate
-#         if not text or len(text.strip()) < 10:
-#             return 'unknown'
-#         return detect(text)
-#     except LangDetectException:
-#         return 'unknown'  
-# 
+
 def detect_article_language(text: str) -> str:
     """Safely detects language code (e.g., 'en', 'hi'). Returns 'unknown' if it fails."""
     try:
         # Langdetect needs a minimum amount of text to be accurate
         if not text or len(text.strip()) < 10:
             return "unknown"
-
         return detect(text)
-
     except LangDetectException:
         return "unknown"      
 
-def rephrase_articles_task(db: Session, text: str):
+async def rephrase_articles_task(db: Session, batch_size: int = None, target_content_id: int = None):
     print(f"Starting rephrasing for articles...")
     
     # Fetch content that has NOT been rephrased yet
-    # pending_content = (
-    #     db.query(Content)
-    #     .filter(Content.is_rephrased == False)
-    #     .filter(Content.body_text != "")
-    #     .limit(text)
-    #     .all()
-    # )
-
-    # if not pending_content:
-    #     print("No articles pending rephrasing.")
-    #     return
-
-    # for article in pending_content:
-    #     print(f"Rephrasing article ID: {article.id}...")
-        
-        # Pass the original Markdown to the AI
-    new_markdown = rephrase_markdown(text)
-    print(new_markdown)
-        
-        # if new_markdown:
-        #     # Save the result and mark it as done
-        #     article.rephrased_text = new_markdown
-        #     article.is_rephrased = True
+    if target_content_id:
+        print(f"Starting rephrasing for specific Content ID: {target_content_id}...")
+        pending_content = (
+            db.query(Content)
+            .filter(Content.id == target_content_id)
+            .all()
+        )
+    elif batch_size is not None:
+        print(f"Fetching a batch of up to {batch_size} articles for rephrasing...")
+        pending_content = (
+            db.query(Content)
+            .filter(Content.is_rephrased == False)
+            .filter(Content.body_text != "")
+            .order_by(Content.id.desc())
+            .limit(batch_size)
+            .all()
+        )
+    else:
+        print("No batch size or target content ID provided. Exiting rephrasing task.")
+        return
             
-        #     db.commit()
-        #     print(f"Successfully rephrased and saved article ID: {article.id}")
-        # else:
-        #     print(f"Failed to rephrase article ID: {article.id}")        
+    if not pending_content:
+        print("No articles pending rephrasing.")
+        return
 
+    print("Sending articles to Ollama concurrently...")
+    tasks = [
+        rephrase_markdown(article.body_text) 
+        for article in pending_content
+    ]
+
+    results = await asyncio.gather(*tasks)
+
+    for article, new_markdown in zip(pending_content, results):
+        if new_markdown:
+            article.rephrased_text = new_markdown
+            article.is_rephrased = True
+            print(f"Successfully rephrased article ID: {article.id}")
+        else:
+            print(f"Failed to rephrase article ID: {article.id}")
+            
+    # 5. Commit all changes to the database at once
+    db.commit()
+    print("Concurrent batch processing complete!")
+
+   
+    # new_markdown = rephrase_markdown(text)
+    # print(new_markdown)
+        
+        
 def crawl_website_task(domain: str, db: Session):
     print(f"Starting crawl for {domain}...")
     
@@ -137,22 +146,13 @@ def scrape_articles_task(db: Session,  batch_size=None, url=None):
                 continue
             
             soup = BeautifulSoup(response.content, 'html.parser')
-            # print(f" soup      {soup}")
 
             extractor_func = get_extractor_for_url(item.url)
             scraped_data = extractor_func(soup)
 
-            # print(f"extractor_func       {extractor_func}")
-
-            # print(f"scraped_data      {scraped_data}")
-
             title = scraped_data["title"]
             image = scraped_data["image"]
             content = scraped_data["content"]
-
-            # print(f"title {title}")
-            # print(f"image {image}")
-            # print(f"content {content}")
 
             # --- 1. Save Content ---
             new_content = Content(
@@ -248,28 +248,78 @@ def get_crawled_urls(domain: str = None, limit: int = 100, db: Session = Depends
 
 @app.post("/scrape-content/")
 async def trigger_content_scraping(
-    background_tasks: BackgroundTasks, 
-    url: Optional[str] = None,
-    batch_size: Optional[int] = None, 
+    background_tasks: BackgroundTasks,
+    batch_size: int = None, 
+    url: str = None, 
     db: Session = Depends(get_db)
 ):
     background_tasks.add_task(scrape_articles_task, db, batch_size, url)
     return {
-        "message": f"Started background task to scrape up to {batch_size} articles.",
+        "message": f"Started background task to scrape up to {url} articles.",
         "status": "Accepted"
     }
 
 
+# @app.post("/scrape-content/batch/")
+# async def trigger_content_scraping(
+#     background_tasks: BackgroundTasks, 
+#     batch_size: int = None, 
+#     db: Session = Depends(get_db)
+# ):
+#     background_tasks.add_task(scrape_articles_task, db, batch_size)
+#     return {
+#         "message": f"Started background task to scrape up to {batch_size} articles.",
+#         "status": "Accepted"
+#     }
+
+
+# @app.post("/rephrase-content/url/")
+# async def trigger_url_rephrasing(
+#     background_tasks: BackgroundTasks, 
+#     text: str, 
+#     db: Session = Depends(get_db)
+# ):
+#     """Triggers the AI to rewrite scraped articles."""
+#     background_tasks.add_task(rephrase_articles_task, db, text)
+    
+#     return {
+#         "message": f"Started background task to rephrase up to articles.",
+#         "status": "Accepted"
+#     }    
+
+
 @app.post("/rephrase-content/")
-async def trigger_rephrasing(
+async def trigger_batch_rephrasing(
     background_tasks: BackgroundTasks, 
-    text: str, 
+    content_id: int = None,
+    batch_size: int = None, 
     db: Session = Depends(get_db)
 ):
-    """Triggers the AI to rewrite scraped articles."""
-    background_tasks.add_task(rephrase_articles_task, db, text)
+    """
+    Rephrases a batch of un-rephrased articles.
+    Example: POST /rephrase-content/batch/?batch_size=10
+    """
+    background_tasks.add_task(rephrase_articles_task, db, batch_size, content_id)
     
     return {
-        "message": f"Started background task to rephrase up to articles.",
+        "message": f"Started background task to rephrase up to {batch_size} articles.",
         "status": "Accepted"
-    }    
+    }
+
+
+# @app.post("/rephrase-content/single/")
+# async def trigger_single_rephrasing(
+#     content_id: int, 
+#     background_tasks: BackgroundTasks, 
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Rephrases one specific article by its Content ID.
+#     Example: POST /rephrase-content/single/?content_id=12
+#     """
+#     background_tasks.add_task(rephrase_articles_task, db, batch_size=None, target_content_id=content_id)
+    
+#     return {
+#         "message": f"Started background task to rephrase Content ID: {content_id}.",
+#         "status": "Accepted"
+#     }

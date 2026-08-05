@@ -34,52 +34,87 @@
 
 
 
-from transformers import pipeline
-import torch
+# from transformers import pipeline
+# import torch
 
-print("Loading local Transformer model into memory. This may take a minute...")
+# print("Loading local Transformer model into memory. This may take a minute...")
 
-# Initialize the pipeline globally
-# We use device_map="auto" so it automatically uses your GPU if you have one, or falls back to CPU
-rephrase_pipe = pipeline(
-    "text-generation",
-    model="Qwen/Qwen2.5-1.5B-Instruct", 
-    device_map="auto", 
-    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
-)
-print("Model successfully loaded!")
+# # Initialize the pipeline globally
+# # We use device_map="auto" so it automatically uses your GPU if you have one, or falls back to CPU
+# rephrase_pipe = pipeline(
+#     "text-generation",
+#     model="Qwen/Qwen2.5-1.5B-Instruct", 
+#     device_map="auto", 
+#     torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+# )
+# print("Model successfully loaded!")
 
-def rephrase_markdown(original_markdown: str) -> str:
-    """Sends Markdown text to a local Transformer LLM to be rephrased."""
+# def rephrase_markdown(original_markdown: str) -> str:
+#     """Sends Markdown text to a local Transformer LLM to be rephrased."""
     
-    # We structure the prompt exactly like we would for an API
-    messages = [
-        {
-            "role": "system", 
-            "content": (
-                "You are an expert copywriter. Rewrite the provided article to make it unique. "
-                "CRITICAL: You MUST preserve all Markdown formatting exactly as it is, "
-                "including headers (##), bold text (**text**), and links. "
-                "Output ONLY the rephrased Markdown without any conversational filler."
-            )
-        },
-        {"role": "user", "content": original_markdown}
-    ]
+#     # We structure the prompt exactly like we would for an API
+#     messages = [
+#         {
+#             "role": "system", 
+#             "content": (
+#                 "You are an expert copywriter. Rewrite the provided article to make it unique. "
+#                 "CRITICAL: You MUST preserve all Markdown formatting exactly as it is, "
+#                 "including headers (##), bold text (**text**), and links. "
+#                 "Output ONLY the rephrased Markdown without any conversational filler."
+#             )
+#         },
+#         {"role": "user", "content": original_markdown}
+#     ]
+
+#     try:
+#         # Generate the text
+#         result = rephrase_pipe(
+#             messages,
+#             # max_new_tokens=1500,  # Ensure it has enough room to output a full article
+#             temperature=0.7,      # Slight creativity
+#             do_sample=True
+#         )
+        
+#         # The pipeline returns the full conversation history; we only want the final response
+#         generated_reply = result[0]["generated_text"][-1]["content"]
+        
+#         return generated_reply.strip()
+        
+#     except Exception as e:
+#         print(f"Error during local Transformer rephrasing: {e}")
+#         return ""
+
+
+
+
+
+from ollama import AsyncClient
+
+async def rephrase_markdown(original_markdown: str) -> str:
+    """Sends Markdown text to local Ollama server to be rephrased."""
+    
+    system_prompt = """
+    You are an expert copywriter. Rewrite the provided article to make it unique. 
+    
+    CRITICAL RULES:
+    1. You MUST preserve all Markdown formatting exactly as it is, including headers (##), bold text (**text**), and links. 
+    2. Do not remove any structural elements.
+    3. Output ONLY the rephrased Markdown without any conversational filler or introductions.
+    """
 
     try:
-        # Generate the text
-        result = rephrase_pipe(
-            messages,
-            # max_new_tokens=1500,  # Ensure it has enough room to output a full article
-            temperature=0.7,      # Slight creativity
-            do_sample=True
+        # Send the chat request to your local Ollama instance
+        response = await AsyncClient().chat(
+            model='llama3', # Change to 'qwen2.5' or 'mistral' if you pulled a different model
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': original_markdown}
+            ]
         )
         
-        # The pipeline returns the full conversation history; we only want the final response
-        generated_reply = result[0]["generated_text"][-1]["content"]
-        
-        return generated_reply.strip()
+        # Extract the text content from the response
+        return response['message']['content'].strip()
         
     except Exception as e:
-        print(f"Error during local Transformer rephrasing: {e}")
+        print(f"Error during Ollama rephrasing: {e}")
         return ""

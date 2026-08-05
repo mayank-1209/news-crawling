@@ -81,6 +81,8 @@ class Content(Base):
     title = Column(String(500))
     body_description = Column(Text)
     body_text = Column(Text)
+    rephrased_text = Column(Text, nullable=True) 
+    is_rephrased = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     source_url = relationship("ScrapedURL", back_populates="content")
