@@ -26,8 +26,7 @@ def get_sitemap_from_robots(domain: str) -> list[str]:
                 return filtered_sitemaps
     except Exception as e:
         print(f"Error reading robots.txt for {domain}: {e}")
-    
-    return [f"{domain}/sitemap.xml"]
+        return [f"{domain}/sitemap.xml"]
 
 
 def fetch_and_parse_sitemap(sitemap_url: str) -> list[str]:

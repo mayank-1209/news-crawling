@@ -10,7 +10,7 @@ from extractor import extract_aajtak, extract_default, extract_hindi_news18, ext
 # Map domain strings to their specific functions
 EXTRACTOR_MAP = {
     "www.news18.com": extract_new18,
-    "hindi.news18.com": extract_hindi_news18,
+    "www.hindi.news18.com": extract_hindi_news18,
     "www.aajtak.in": extract_aajtak,
 }
 

@@ -33,7 +33,7 @@ def detect_article_language(text: str) -> str:
     except LangDetectException:
         return "unknown"      
 
-async def rephrase_articles_task(db: Session, batch_size: int = None, target_content_id: int = None):
+async def rephrase_articles_task(db: Session, batch_size: int, target_content_id: int = None):
     print(f"Starting rephrasing for articles...")
     
     # Fetch content that has NOT been rephrased yet
@@ -100,15 +100,15 @@ def crawl_website_task(domain: str, db: Session):
             print(f"Stored {len(extracted_urls)} URLs from {sitemap_url}")
 
     # Manually added sitemaps
-    sitemap_url_manually = [
-        "https://www.aajtak.in/rssfeeds/news-sitemap.xml",
+    # sitemap_url_manually = [
+    #     "https://www.aajtak.in/rssfeeds/news-sitemap.xml",
        # "https://www.news18.com/commonfeeds/v1/eng/sitemap/google-news.xml",
         #"https://www.news18.com/commonfeeds/v1/eng/sitemap/google-news/today.xml",
        # "https://www.news18.com/commonfeeds/v1/eng/sitemap/google-news/yesterday.xml",
       #  "https://hindi.news18.com/allstory-sitemap-data.xml",
       #  "https://hindi.news18.com/commonfeeds/v1/hin/sitemap/google-news/yesterday.xml",
        # "https://hindi.news18.com/commonfeeds/v1/hin/sitemap/google-news/today.xml"
-    ]
+    # ]
     
     # for site_map_man in sitemap_url_manually:
     #     print(f"Parsing manually added sitemap: {site_map_man}")
@@ -118,10 +118,10 @@ def crawl_website_task(domain: str, db: Session):
     #         print(f"Stored {len(extracted_urls)} URLs from {site_map_man}")
 
 
-def scrape_articles_task(db: Session,  batch_size=None, url=None):
+def scrape_articles_task(db: Session,  batch_size: int, url=None):
     if batch_size:
         print(f"Starting content extraction for {batch_size} articles...")   
-        pending_urls = db.query(ScrapedURL).filter(ScrapedURL.is_scraped == False).limit(batch_size).all() 
+        pending_urls = db.query(ScrapedURL).filter(ScrapedURL.is_scraped == False).order_by(ScrapedURL.id.desc()).limit(batch_size).all() 
     elif url:
         print(f"Starting content extraction for {url} ...")  
         pending_urls = db.query(ScrapedURL).filter(ScrapedURL.url == url).all()  
@@ -249,7 +249,7 @@ def get_crawled_urls(domain: str = None, limit: int = 100, db: Session = Depends
 @app.post("/scrape-content/")
 async def trigger_content_scraping(
     background_tasks: BackgroundTasks,
-    batch_size: int = None, 
+    batch_size: int = 10, 
     url: str = None, 
     db: Session = Depends(get_db)
 ):
@@ -292,7 +292,7 @@ async def trigger_content_scraping(
 async def trigger_batch_rephrasing(
     background_tasks: BackgroundTasks, 
     content_id: int = None,
-    batch_size: int = None, 
+    batch_size: int = 5, 
     db: Session = Depends(get_db)
 ):
     """
