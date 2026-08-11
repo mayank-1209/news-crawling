@@ -11,9 +11,13 @@ from sqlalchemy.orm import Session
 from crawler import fetch_and_parse_sitemap, get_sitemap_from_robots, store_urls_in_db
 from database import ContentLanguage, Language, SessionLocal, Domain, ScrapedURL, Content, Media
 from parser import get_extractor_for_url
-from rephraser import rephrase_markdown
+# from rephraser import rephrase_markdown
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 app = FastAPI()
+# Initialize the scheduler
+scheduler = AsyncIOScheduler()
 
 def get_db():
     db = SessionLocal()
@@ -22,7 +26,9 @@ def get_db():
     finally:
         db.close()
 
-
+#-------------------------------------------------------------------------------
+#                      LANGUAGE DETECTION
+#-------------------------------------------------------------------------------
 def detect_article_language(text: str) -> str:
     """Safely detects language code (e.g., 'en', 'hi'). Returns 'unknown' if it fails."""
     try:
@@ -33,59 +39,100 @@ def detect_article_language(text: str) -> str:
     except LangDetectException:
         return "unknown"      
 
-async def rephrase_articles_task(db: Session, batch_size: int, target_content_id: int = None):
-    print(f"Starting rephrasing for articles...")
+
+#-------------------------------------------------------------------------------
+#                      APSCHEDULER SCRAP CONTENT
+#-------------------------------------------------------------------------------
+
+def scheduled_scrape_job():
+    """Wrapper to handle the DB session for scheduled scraping."""
+    print("Executing scheduled scrape job...")
+    db = SessionLocal()
+    try:
+        # Run your existing synchronous scraping function
+        scrape_articles_task(db, batch_size=1)
+    except Exception as e:
+        print(f"Scheduled scrape failed: {e}")
+    finally:
+        db.close()
+
+#-------------------------------------------------------------------------------
+#                      APSCHEDULER SCRAP REPHRASE CONTENT
+#-------------------------------------------------------------------------------
+
+# async def scheduled_rephrase_job():
+#     """Wrapper to handle the DB session for scheduled async rephrasing."""
+#     print("Executing scheduled rephrase job...")
+#     db = SessionLocal()
+#     try:
+#         # Run your existing async rephrasing function
+#         await rephrase_articles_task(db, batch_size=1)
+#     except Exception as e:
+#         print(f"Scheduled rephrase failed: {e}")
+#     finally:
+#         db.close()
+
+
+#-------------------------------------------------------------------------------
+#                      SCRAP REPHRASE CONTENT
+#-------------------------------------------------------------------------------
+
+# async def rephrase_articles_task(db: Session, batch_size: int, target_content_id: int = None):
+#     print(f"Starting rephrasing for articles...")
     
-    # Fetch content that has NOT been rephrased yet
-    if target_content_id:
-        print(f"Starting rephrasing for specific Content ID: {target_content_id}...")
-        pending_content = (
-            db.query(Content)
-            .filter(Content.id == target_content_id)
-            .all()
-        )
-    elif batch_size is not None:
-        print(f"Fetching a batch of up to {batch_size} articles for rephrasing...")
-        pending_content = (
-            db.query(Content)
-            .filter(Content.is_rephrased == False)
-            .filter(Content.body_text != "")
-            .order_by(Content.id.desc())
-            .limit(batch_size)
-            .all()
-        )
-    else:
-        print("No batch size or target content ID provided. Exiting rephrasing task.")
-        return
+#     # Fetch content that has NOT been rephrased yet
+#     if target_content_id:
+#         print(f"Starting rephrasing for specific Content ID: {target_content_id}...")
+#         pending_content = (
+#             db.query(Content)
+#             .filter(Content.id == target_content_id)
+#             .all()
+#         )
+#     elif batch_size is not None:
+#         print(f"Fetching a batch of up to {batch_size} articles for rephrasing...")
+#         pending_content = (
+#             db.query(Content)
+#             .filter(Content.is_rephrased == False)
+#             .filter(Content.body_text != "")
+#             .order_by(Content.id.desc())
+#             .limit(batch_size)
+#             .all()
+#         )
+#     else:
+#         print("No batch size or target content ID provided. Exiting rephrasing task.")
+#         return
             
-    if not pending_content:
-        print("No articles pending rephrasing.")
-        return
+#     if not pending_content:
+#         print("No articles pending rephrasing.")
+#         return
 
-    print("Sending articles to Ollama concurrently...")
-    tasks = [
-        rephrase_markdown(article.body_text) 
-        for article in pending_content
-    ]
+#     print("Sending articles to Ollama concurrently...")
+#     tasks = [
+#         rephrase_markdown(article.body_text) 
+#         for article in pending_content
+#     ]
 
-    results = await asyncio.gather(*tasks)
+#     results = await asyncio.gather(*tasks)
 
-    for article, new_markdown in zip(pending_content, results):
-        if new_markdown:
-            article.rephrased_text = new_markdown
-            article.is_rephrased = True
-            print(f"Successfully rephrased article ID: {article.id}")
-        else:
-            print(f"Failed to rephrase article ID: {article.id}")
+#     for article, new_markdown in zip(pending_content, results):
+#         if new_markdown:
+#             article.rephrased_text = new_markdown
+#             article.is_rephrased = True
+#             print(f"Successfully rephrased article ID: {article.id}")
+#         else:
+#             print(f"Failed to rephrase article ID: {article.id}")
             
-    # 5. Commit all changes to the database at once
-    db.commit()
-    print("Concurrent batch processing complete!")
+#     # 5. Commit all changes to the database at once
+#     db.commit()
+#     print("Concurrent batch processing complete!")
 
    
     # new_markdown = rephrase_markdown(text)
     # print(new_markdown)
         
+#-------------------------------------------------------------------------------
+#                      WEBSITE DOMAIN EXTRACT SITE-MAPS URL
+#-------------------------------------------------------------------------------
         
 def crawl_website_task(domain: str, db: Session):
     print(f"Starting crawl for {domain}...")
@@ -117,6 +164,10 @@ def crawl_website_task(domain: str, db: Session):
     #         store_urls_in_db(db, domain, extracted_urls)
     #         print(f"Stored {len(extracted_urls)} URLs from {site_map_man}")
 
+
+#-------------------------------------------------------------------------------
+#                         SCRAP CONTENT
+#-------------------------------------------------------------------------------
 
 def scrape_articles_task(db: Session,  batch_size: int, url=None):
     if batch_size:
@@ -224,6 +275,51 @@ def scrape_articles_task(db: Session,  batch_size: int, url=None):
             db.rollback()
 
 
+#-------------------------------------------------------------------------------
+#                               APSCHEDULER 
+#-------------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- STARTUP LOGIC ---
+    print("Starting up APScheduler...")
+    
+    # Schedule the scraper to run every 15 minutes
+    scheduler.add_job(
+        scheduled_scrape_job, 
+        'interval', 
+        minutes=1, 
+        id="scrape_job", 
+        replace_existing=True
+    )
+    
+    # Schedule the AI rephraser to run every 30 minutes
+    # scheduler.add_job(
+    #     scheduled_rephrase_job, 
+    #     'interval', 
+    #     minutes=30, 
+    #     id="rephrase_job", 
+    #     replace_existing=True
+    # )
+    
+    scheduler.start()
+    
+    # Yield control back to FastAPI so it can accept API requests
+    yield
+    
+    # --- SHUTDOWN LOGIC ---
+    print("Shutting down APScheduler...")
+    scheduler.shutdown()
+
+# Apply the lifespan to your FastAPI app instance
+app = FastAPI(lifespan=lifespan)
+
+
+
+#-------------------------------------------------------------------------------
+#                               FASTAPI ENDPOINTS
+#-------------------------------------------------------------------------------
 
 @app.post("/crawl/")
 async def start_crawl(domain: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -288,23 +384,23 @@ async def trigger_content_scraping(
 #     }    
 
 
-@app.post("/rephrase-content/")
-async def trigger_batch_rephrasing(
-    background_tasks: BackgroundTasks, 
-    content_id: int = None,
-    batch_size: int = 5, 
-    db: Session = Depends(get_db)
-):
-    """
-    Rephrases a batch of un-rephrased articles.
-    Example: POST /rephrase-content/batch/?batch_size=10
-    """
-    background_tasks.add_task(rephrase_articles_task, db, batch_size, content_id)
+# @app.post("/rephrase-content/")
+# async def trigger_batch_rephrasing(
+#     background_tasks: BackgroundTasks, 
+#     content_id: int = None,
+#     batch_size: int = 5, 
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Rephrases a batch of un-rephrased articles.
+#     Example: POST /rephrase-content/batch/?batch_size=10
+#     """
+#     background_tasks.add_task(rephrase_articles_task, db, batch_size, content_id)
     
-    return {
-        "message": f"Started background task to rephrase up to {batch_size} articles.",
-        "status": "Accepted"
-    }
+#     return {
+#         "message": f"Started background task to rephrase up to {batch_size} articles.",
+#         "status": "Accepted"
+#     }
 
 
 # @app.post("/rephrase-content/single/")

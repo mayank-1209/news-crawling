@@ -1,12 +1,24 @@
 from sqlalchemy import Boolean, ForeignKey, Text, create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from datetime import datetime
+from dotenv import load_dotenv
+import os
 
-# Use SQLite for simplicity, but you can swap this for PostgreSQL/MySQL
-SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:@localhost:3306/python"
+load_dotenv(".env.local")
+load_dotenv(".env")
 
 
-engine = create_engine( SQLALCHEMY_DATABASE_URL)
+LOCAL_DATABASE_URL = os.getenv("SQLALCHEMY_DATABASE_URL")
+
+SERVER_DATABASE_URL = os.getenv("SERVER_DATABASE_URL")
+print("LOCAL_DATABASE_URL:", LOCAL_DATABASE_URL)
+print("SERVER_DATABASE_URL:", SERVER_DATABASE_URL)
+
+if LOCAL_DATABASE_URL:
+    engine = create_engine(LOCAL_DATABASE_URL)
+else:
+    engine = create_engine(SERVER_DATABASE_URL)
+
 with engine.connect() as conn:
     print("Connected successfully!")
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

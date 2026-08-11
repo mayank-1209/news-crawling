@@ -88,33 +88,33 @@
 
 
 
-from ollama import AsyncClient
+# from ollama import AsyncClient
 
-async def rephrase_markdown(original_markdown: str) -> str:
-    """Sends Markdown text to local Ollama server to be rephrased."""
+# async def rephrase_markdown(original_markdown: str) -> str:
+#     """Sends Markdown text to local Ollama server to be rephrased."""
     
-    system_prompt = """
-    You are an expert copywriter. Rewrite the provided article to make it unique. 
+#     system_prompt = """
+#     You are an expert copywriter. Rewrite the provided article to make it unique. 
     
-    CRITICAL RULES:
-    1. You MUST preserve all Markdown formatting exactly as it is, including headers (##), bold text (**text**), and links. 
-    2. Do not remove any structural elements.
-    3. Output ONLY the rephrased Markdown without any conversational filler or introductions.
-    """
+#     CRITICAL RULES:
+#     1. You MUST preserve all Markdown formatting exactly as it is, including headers (##), bold text (**text**), and links. 
+#     2. Do not remove any structural elements.
+#     3. Output ONLY the rephrased Markdown without any conversational filler or introductions.
+#     """
 
-    try:
-        # Send the chat request to your local Ollama instance
-        response = await AsyncClient().chat(
-            model='llama3', # Change to 'qwen2.5' or 'mistral' if you pulled a different model
-            messages=[
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': original_markdown}
-            ]
-        )
+#     try:
+#         # Send the chat request to your local Ollama instance
+#         response = await AsyncClient().chat(
+#             model='llama3', # Change to 'qwen2.5' or 'mistral' if you pulled a different model
+#             messages=[
+#                 {'role': 'system', 'content': system_prompt},
+#                 {'role': 'user', 'content': original_markdown}
+#             ]
+#         )
         
-        # Extract the text content from the response
-        return response['message']['content'].strip()
+#         # Extract the text content from the response
+#         return response['message']['content'].strip()
         
-    except Exception as e:
-        print(f"Error during Ollama rephrasing: {e}")
-        return ""
+#     except Exception as e:
+#         print(f"Error during Ollama rephrasing: {e}")
+#         return ""
