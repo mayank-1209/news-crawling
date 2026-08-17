@@ -4,9 +4,10 @@ services:
   web:
     build: .
     container_name: web-scraper
-
+    volumes:
+      # Maps the EC2 server's physical folder to the container's static folder
+      - ./server_media:/app/static/media
     restart: unless-stopped
-
     ports:
       - "8000:8000"
 

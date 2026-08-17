@@ -8,7 +8,7 @@ set -e
 # ==========================
 
 EC2_USER="mayank"
-EC2_IP="13.202.84.114"
+EC2_IP="13.200.12.231"
 
 REMOTE_DIR="/home/mayank/web-scrapping"
 

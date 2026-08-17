@@ -121,7 +121,8 @@ class Media(Base):
     id = Column(Integer, primary_key=True, index=True)
     content_id = Column(Integer, ForeignKey("contents.id"), index=True, nullable=False)
     media_url = Column(String(2048), nullable=False)
-
+    base_url = Column(String(2048), nullable=True) 
+    
     content = relationship("Content", back_populates="media")
 
 

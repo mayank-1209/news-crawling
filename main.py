@@ -7,13 +7,15 @@ from langdetect.lang_detect_exception import LangDetectException
 from fastapi import FastAPI, BackgroundTasks, Depends
 import requests
 from sqlalchemy.orm import Session
-
+from sqlalchemy.dialects.mysql import insert
 from crawler import fetch_and_parse_sitemap, get_sitemap_from_robots, store_urls_in_db
 from database import ContentLanguage, Language, SessionLocal, Domain, ScrapedURL, Content, Media
 from parser import get_extractor_for_url
 # from rephraser import rephrase_markdown
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from downloader import download_media_to_server
+
 
 app = FastAPI()
 # Initialize the scheduler
@@ -25,6 +27,106 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def scrape_with_selenium(url: str):
+    """Scrape a JS-rendered webpage using Selenium."""
+
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.support.ui import WebDriverWait
+    except Exception:
+        print("Selenium is not installed or available.")
+        return None
+
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+
+    driver = None
+
+    try:
+        driver = webdriver.Chrome(options=options)
+        print(f"Opening URL: {url}")
+        driver.get(url)
+
+        # Wait until browser finishes loading
+        WebDriverWait(driver, 20).until(
+            lambda d: d.execute_script(
+                "return document.readyState"
+            ) == "complete"
+        )
+
+        # Give React/Next.js time to hydrate/render
+        WebDriverWait(driver, 10).until(
+            lambda d: d.execute_script(
+                "return document.body.innerText.length > 100"
+            )
+        )
+        # Small additional wait for API/React rendering
+        import time
+        time.sleep(2)
+
+        html = driver.page_source
+        print(f"Page loaded successfully: {url}")
+
+        return html
+
+    except Exception as e:
+        print(f"Selenium fallback failed for {url}: {e}")
+        return None
+
+    finally:
+        if driver:
+            driver.quit()
+
+
+def selenium_scrape_articles_task(db: Session, url: str = None):
+    print(f"Starting Selenium scraping for {url}...")
+    try:
+        html = scrape_with_selenium(url)
+
+        if not html:
+            print(f"Selenium scraping failed for {url}.")
+            return
+
+        soup = BeautifulSoup(html, "html.parser")
+        extractor_func = get_extractor_for_url(url)
+        scraped_data = extractor_func(soup)
+
+        if not scraped_data:
+            print(f"No data extracted from {url}")
+            return
+
+        # print(f"SCRAPED DATA-------------------------------------------{scraped_data}")
+
+        title = scraped_data.get("title")
+        image = scraped_data.get("image")
+        content = scraped_data.get("content")
+
+        print(f"title--------------------{title}")
+        print(f"content------------------{content}")
+        print(f"image---------------------{image}")
+
+        if not title:
+            print("WARNING: Title is empty")
+        if not content:
+            print("WARNING: Content is empty")
+        if not image:
+            print("WARNING: Image is empty")
+
+        # Save to database here
+
+    except Exception as e:
+        db.rollback()
+        print(
+            f"Failed to scrape {url} with Selenium: {e}"
+        )
+    
+
 
 #-------------------------------------------------------------------------------
 #                      LANGUAGE DETECTION
@@ -50,7 +152,8 @@ def scheduled_scrape_job():
     db = SessionLocal()
     try:
         # Run your existing synchronous scraping function
-        scrape_articles_task(db, batch_size=1)
+        # scrape_articles_task(db, batch_size=1)
+        return
     except Exception as e:
         print(f"Scheduled scrape failed: {e}")
     finally:
@@ -170,64 +273,242 @@ def crawl_website_task(domain: str, db: Session):
 #-------------------------------------------------------------------------------
 
 def scrape_articles_task(db: Session,  batch_size: int, url=None):
-    if batch_size:
-        print(f"Starting content extraction for {batch_size} articles...")   
-        pending_urls = db.query(ScrapedURL).filter(ScrapedURL.is_scraped == False).order_by(ScrapedURL.id.desc()).limit(batch_size).all() 
-    elif url:
-        print(f"Starting content extraction for {url} ...")  
-        pending_urls = db.query(ScrapedURL).filter(ScrapedURL.url == url).all()  
-    else:
-        print("Neither url nor batch_size provided")
-        return    
+    import random
 
-    # print(f"path  {pending_urls} ")    
+    if batch_size:
+        print(f"Starting content extraction for " f"{batch_size} articles...")
+
+        pending_count = (
+            db.query(ScrapedURL)
+            .filter(
+                ScrapedURL.is_scraped == False
+            )
+            .count()
+        )
+
+        if pending_count == 0:
+            print("No pending URLs available.")
+            return
+
+        if pending_count > batch_size:
+            random_offset = random.randint(
+                0,
+                pending_count - batch_size
+            )
+        else:
+            random_offset = 0
+
+        print(f"Pending URLs: {pending_count}")
+        print(f"Random offset: {random_offset}")
+
+        pending_urls = (
+            db.query(ScrapedURL)
+            .filter(
+                ScrapedURL.is_scraped == False
+            )
+            .order_by(
+                ScrapedURL.id.desc()
+            )
+            .offset(random_offset)
+            .limit(batch_size)
+            .all()
+        )
+
+    elif url:
+
+        print(f"Starting content extraction for {url} ...")
+
+        pending_urls = (
+            db.query(ScrapedURL)
+            .filter(
+                ScrapedURL.url == url
+            )
+            .all()
+        )
+
+        # ---------------------------------------------
+        # URL not found -> fallback to random URL
+        # ---------------------------------------------
+
+        if not pending_urls:
+
+            print(f"URL not found: {url}")
+            print("Picking a random pending URL instead...")
+
+            pending_count = (
+                db.query(ScrapedURL)
+                .filter(
+                    ScrapedURL.is_scraped == False
+                )
+                .count()
+            )
+
+            if pending_count == 0:
+                print("No pending URLs available.")
+                return
+
+            random_offset = random.randint(
+                0,
+                pending_count - 1
+            )
+
+            pending_urls = (
+                db.query(ScrapedURL)
+                .filter(
+                    ScrapedURL.is_scraped == False
+                )
+                .order_by(
+                    ScrapedURL.id.desc()
+                )
+                .offset(random_offset)
+                .limit(1)
+                .all()
+            )
+
+    else:
+
+        # ---------------------------------------------
+        # No batch_size AND no URL
+        # -> Pick one random pending URL
+        # ---------------------------------------------
+
+        print("Neither url nor batch_size provided.")
+        print("Picking a random pending URL...")
+
+        pending_count = (
+            db.query(ScrapedURL)
+            .filter(
+                ScrapedURL.is_scraped == False
+            )
+            .count()
+        )
+
+        if pending_count == 0:
+            print("No pending URLs available.")
+            return
+
+        random_offset = random.randint(
+            0,
+            pending_count - 1
+        )
+
+        print(f"Random offset: {random_offset}")
+
+        pending_urls = (
+            db.query(ScrapedURL)
+            .filter(
+                ScrapedURL.is_scraped == False
+            )
+            .order_by(
+                ScrapedURL.id.desc()
+            )
+            .offset(random_offset)
+            .limit(1)
+            .all()
+        )   
 
     if not pending_urls:
         print("No pending URLs found in the database.")
         return
 
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-
+ 
     for item in pending_urls:
         try:
             response = requests.get(item.url, headers=headers, timeout=10)
-            
             if response.status_code != 200:
                 print(f"Skipping {item.url} - Status Code: {response.status_code}")
-                continue
-            
-            soup = BeautifulSoup(response.content, 'html.parser')
+                html = scrape_with_selenium(item.url)
+                if not html:
+                    print(f"Selenium failed for {item.url}")
+                    continue
+            else:
+                html = response.content 
+
+            soup = BeautifulSoup(html, 'html.parser')
 
             extractor_func = get_extractor_for_url(item.url)
             scraped_data = extractor_func(soup)
 
             title = scraped_data["title"]
             image = scraped_data["image"]
-            content = scraped_data["content"]
+            content = scraped_data["content"] 
 
-            # --- 1. Save Content ---
-            new_content = Content(
-                url_id=item.id, 
-                title=title[:500], 
-                body_description=content[:600],
-                body_text=content
-            )
+#-------------------------------------------------------------------------------
+#          use MySQL UPSERT---- duplicate → update
+#-------------------------------------------------------------------------------            
 
-            print(f"new-content   {new_content}")
-            db.add(new_content)
-            db.commit()
-            db.refresh(new_content) 
+            # stmt = insert(Content).values(
+            # url_id=item.id,
+            # title=title[:500],
+            # body_description=content[:600],
+            # body_text=content,
+            # rephrased_text=None,
+            # is_rephrased=False,
+            # )
 
+            # stmt = stmt.on_duplicate_key_update(
+            # title=stmt.inserted.title,
+            # body_description=stmt.inserted.body_description,
+            # body_text=stmt.inserted.body_text,
+            # )
+
+            # db.execute(stmt)
+            # db.flush()
+#-------------------------------------------------------------------------------
+#          application-level safeguard.---- duplicate → update
+#-------------------------------------------------------------------------------
+            
+            
+            existing_content = (
+                db.query(Content) .filter(Content.url_id == item.id).first())
+
+            if existing_content:
+                print(f"Content already exists for url_id={item.id}")
+
+                new_content = existing_content
+
+                # Update existing content
+                new_content.title = title[:500]
+                new_content.body_description = content[:300]
+                new_content.body_text = content
+
+            else:
+
+                print(f"Creating new Content for url_id={item.id}")
+
+                new_content = Content(
+                    url_id=item.id,
+                    title=title[:500],
+                    body_description=content[:300],
+                    body_text=content
+                )
+
+                db.add(new_content)
+
+            # Get content.id without committing
+            db.flush()
+
+            print(f"content id: {new_content.id}")
             print("-------------------------------------------")
 
             # --- 2. Save Media ---
 
-            print(f"image---------------- {image}")
+            # --- NEW: Download the image to your server ---
+            local_image_path = ""
             if image:
+                print(f"Downloading image: {image}")
+                local_image_path = download_media_to_server(image)
+                print(f"local_image_path-------------------{local_image_path}")
+
+            print(f"image---------------- {image}")
+            if local_image_path:
                 new_media = Media(
                     content_id=new_content.id,
-                    media_url=image,
+                    media_url=local_image_path, # e.g., "static/media/123-uuid.jpg"
+                    base_url=image,  
                 )
+                
             print(f"new-media --------------{ new_media}")    
             db.add(new_media)
             db.commit()
@@ -271,8 +552,10 @@ def scrape_articles_task(db: Session,  batch_size: int, url=None):
             print(f"Successfully saved: {title[:50]}... [Language: {lang_code}]")
             
         except Exception as e:
-            print(f"Failed to scrape {item.url}: {e}")
             db.rollback()
+            item.is_scraped = True
+            print(f"Failed to scrape {item.url}: {e}")
+            
 
 
 #-------------------------------------------------------------------------------
@@ -286,13 +569,15 @@ async def lifespan(app: FastAPI):
     print("Starting up APScheduler...")
     
     # Schedule the scraper to run every 15 minutes
-    scheduler.add_job(
-        scheduled_scrape_job, 
-        'interval', 
-        minutes=1, 
-        id="scrape_job", 
-        replace_existing=True
-    )
+    # scheduler.add_job(
+    #     scheduled_scrape_job, 
+    #     'interval', 
+    #     seconds=5, 
+    #     id="scrape_job", 
+    #     replace_existing=True,
+    #     max_instances=1,
+    #     coalesce=True,
+    # )
     
     # Schedule the AI rephraser to run every 30 minutes
     # scheduler.add_job(
@@ -303,7 +588,7 @@ async def lifespan(app: FastAPI):
     #     replace_existing=True
     # )
     
-    scheduler.start()
+    # scheduler.start()
     
     # Yield control back to FastAPI so it can accept API requests
     yield
@@ -345,11 +630,24 @@ def get_crawled_urls(domain: str = None, limit: int = 100, db: Session = Depends
 @app.post("/scrape-content/")
 async def trigger_content_scraping(
     background_tasks: BackgroundTasks,
-    batch_size: int = 10, 
+    batch_size: int = None, 
     url: str = None, 
     db: Session = Depends(get_db)
 ):
     background_tasks.add_task(scrape_articles_task, db, batch_size, url)
+    return {
+        "message": f"Started background task to scrape up to {url} articles.",
+        "status": "Accepted"
+    }
+
+@app.post("/selenium-scrape-content/")
+async def selenium_trigger_content_scraping(
+    background_tasks: BackgroundTasks,
+    # batch_size: int = None, 
+    url: str = None, 
+    db: Session = Depends(get_db)
+):
+    background_tasks.add_task(selenium_scrape_articles_task, db, url)
     return {
         "message": f"Started background task to scrape up to {url} articles.",
         "status": "Accepted"

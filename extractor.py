@@ -1,6 +1,8 @@
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 
+from downloader import download_media_to_server
+
 def extract_hindi_news18(soup: BeautifulSoup) -> dict:
     """Extraction rules specifically for hindi.news18.com"""
     title = ""
@@ -104,7 +106,7 @@ def extract_new18(soup: BeautifulSoup) -> dict:
         first_img = soup.find("img")
         if first_img:
             image = first_img.get("src", "")
-        
+            
     article = soup.find("article")
 
     content = ""
@@ -118,6 +120,43 @@ def extract_new18(soup: BeautifulSoup) -> dict:
     )
 
     # print(content)
+    return {"title": title, "image": image, "content": content}
+
+
+def extract_indiloves(soup: BeautifulSoup) -> dict:
+    """Extraction rules specifically for infiloves"""
+    title = ""
+    if soup.find("meta", property="og:title"):
+        title = soup.find("meta", property="og:title").get("content")
+    elif soup.find("h1"):
+        title = soup.find("h1").get_text(strip=True)
+    elif soup.title:
+        title = soup.title.get_text(strip=True)
+    else:
+        title = "No Title"
+    
+    image = ""
+    og_image = soup.find("meta", property="og:image")
+    if og_image:
+        image = og_image.get("content", "")
+    else:
+        first_img = soup.find("img")
+        if first_img:
+            image = first_img.get("src", "")
+            
+    article = soup.find("article")
+
+    content = ""
+
+    if article:
+        content = "\n\n".join(
+        md(str(tag), heading_style="ATX").strip()    
+        # tag.get_text(" ", strip=True)
+        for tag in article.find_all(["h1","h2", "p"])
+        if tag.get_text(strip=True)
+    )
+
+    # print(f"content----------------------------------------------{content}")
     return {"title": title, "image": image, "content": content}
 
 
