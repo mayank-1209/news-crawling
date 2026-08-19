@@ -130,38 +130,42 @@ def scrape_with_selenium(url: str, device: str = "mobile") -> str:
 def selenium_scrape_articles_task(db: Session, url: str = None):
     print(f"Starting Selenium scraping for {url}...")
 
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    headers = {"User-Agent": (
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Mobile Safari/537.36")}
+        
     try:
-        html = scrape_with_selenium(url)
+        # html = scrape_with_selenium(url)
         # print(f"html-------------------------------------------{html}") 
 
 
-        # response = requests.get(url, headers=headers, timeout=10)
-        # print(f"response.status_code--------------------{response.status_code}")
-        # if response.status_code != 200:
-        #     print(f"Skipping {url} - Status Code: {response.status_code}")
-        #     html = scrape_with_selenium(url)
-        #     if not html:
-        #         print(f"Selenium failed for {url}")
-        # else:
-        #     html = response.content 
+        response = requests.get(url, headers=headers, timeout=10)
+        print(f"response.status_code--------------------{response.status_code}")
+        if response.status_code != 200:
+            print(f"Skipping {url} - Status Code: {response.status_code}")
+            html = scrape_with_selenium(url)
+            if not html:
+                print(f"Selenium failed for {url}")
+        else:
+            html = response.content 
 
-        # if not html:
-        #     print(f"Selenium scraping failed for {url}.")
-        #     return
+        if not html:
+            print(f"Selenium scraping failed for {url}.")
+            return
 
-        # soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
 
         # print(f"SOUP-------------------------------------------{soup}")
-        # extractor_func = get_extractor_for_url(url)
-        # scraped_data = extractor_func(soup)
-        # print(f"scraped_data-------------------------------------------{scraped_data}")
+        extractor_func = get_extractor_for_url(url)
+        scraped_data = extractor_func(soup)
+        print(f"scraped_data-------------------------------------------{scraped_data}")
 
-        # if not scraped_data:
-        #     print(f"No data extracted from {url}")
-        #     return
+        if not scraped_data:
+            print(f"No data extracted from {url}")
+            return
 
-        # # print(f"SCRAPED DATA-------------------------------------------{scraped_data}")
+        print(f"SCRAPED DATA-------------------------------------------{scraped_data}")
 
         # title = scraped_data.get("title")
         # image = scraped_data.get("image")

@@ -1,5 +1,5 @@
 from email.mime import image
-
+import json
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 
@@ -179,14 +179,52 @@ def extract_practo(soup: BeautifulSoup) -> dict:
 
     article = soup.find("div", class_="doctor-profile")
     # content = ""
-    print(f"article----------------------------------------------{article}")
+    # print(f"article----------------------------------------------{article}")
     if article:
-        phone_element = article.find(attrs={"data-qa-id": "phone_number"})
+        name = article.find("h1", class_="doctor-card__name")
+        speciality = article.find("div", class_="doctor-card__speciality")
+        education = article.find("p", class_="doctor-card__education")
+        experience = article.find("p", class_="doctor-card__experience")
+        img = article.find("img", class_="doctor-card__photo")
+        address = article.find("p", class_="address-card__location")
+        map_link = article.find("a", class_="address-card__map-link")
+        bio = article.find("div", class_="bio-section__text")
+        footer = article.find("div", class_="bottom-ctas")
+        phone_number = footer.find("a", href=lambda x: x and "tel:" in x) if footer else None
 
-        if phone_element:
-            phone_number = phone_element.get_text(strip=True)
-            print("Phone number:", phone_number)
-    # print(f"content----------------------------------------------{content}")
+
+        # print(f"name----------------------------------------------{name.get_text(strip=True) if name else 'N/A'},")
+        # print(f"speciality----------------------------------------------{speciality.get_text(strip=True) if speciality else 'N/A'}")
+        # print(f"education----------------------------------------------{education.get_text(strip=True) if education else 'N/A'}")
+        # print(f"experience----------------------------------------------{experience.get_text(strip=True) if experience else 'N/A'}")
+        # print(f"img----------------------------------------------{img.get('src') if img else 'N/A'}")
+        # print(f"address----------------------------------------------{address.get_text(strip=True) if address else 'N/A'}")
+        # print(f"map_link----------------------------------------------{map_link.get('href') if map_link else 'N/A'}")
+        # print(f"bio----------------------------------------------{bio.get_text(strip=True) if bio else 'N/A'}")
+        # print(f"phone_number----------------------------------------------{phone_number.get('href').replace('tel:', '') if phone_number else 'N/A'}")
+
+
+        scrap_data = {
+            "name": name.get_text(strip=True) if name else 'N/A',
+            "speciality": speciality.get_text(strip=True) if speciality else 'N/A',
+            "education": education.get_text(strip=True) if education else 'N/A',
+            "experience": experience.get_text(strip=True) if experience else 'N/A',
+            "img": img.get('src') if img else 'N/A',
+            "address": address.get_text(strip=True) if address else 'N/A',
+            "map_link": map_link.get('href') if map_link else 'N/A',
+            "bio": bio.get_text(strip=True) if bio else 'N/A',
+            "phone_number": phone_number.get('href').replace('tel:', '') if phone_number else 'N/A'
+        }
+
+
+        json_data = json.dumps(
+                scrap_data,
+                ensure_ascii=False,
+                indent=4
+            )
+
+        print(json_data)
+
     # return {"image": image, "content": content}
 
 def extract_default(soup: BeautifulSoup) -> dict:
