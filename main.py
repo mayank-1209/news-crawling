@@ -28,23 +28,38 @@ def get_db():
     finally:
         db.close()
 
-def scrape_with_selenium(url: str):
+def scrape_with_selenium(url: str, device: str = "mobile") -> str:
     """Scrape a JS-rendered webpage using Selenium."""
 
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
         from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support import expected_conditions as EC
     except Exception:
         print("Selenium is not installed or available.")
         return None
 
     options = Options()
-    options.add_argument("--headless=new")
+    # options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
+    if device == "mobile":
+        options.add_experimental_option(
+            "mobileEmulation",
+            {
+                "deviceName": "iPhone 14 Pro"
+            }
+        )
+    else:
+        options.add_argument("--window-size=1843,1342")
+    options.add_argument(
+    "--user-agent=Mozilla/5.0 (X11; Linux x86_64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/151.0.0.0 Safari/537.36"
+    )
 
     driver = None
 
@@ -53,8 +68,10 @@ def scrape_with_selenium(url: str):
         print(f"Opening URL: {url}")
         driver.get(url)
 
+        print(f"Waiting for page to load: {url}")
+
         # Wait until browser finishes loading
-        WebDriverWait(driver, 20).until(
+        WebDriverWait(driver, 2000000).until(
             lambda d: d.execute_script(
                 "return document.readyState"
             ) == "complete"
@@ -66,9 +83,35 @@ def scrape_with_selenium(url: str):
                 "return document.body.innerText.length > 100"
             )
         )
-        # Small additional wait for API/React rendering
         import time
-        time.sleep(2)
+        time.sleep(10)
+
+        driver.find_element(By.ID, "username").send_keys("9889076306")
+        driver.find_element(By.ID, "password").send_keys("12345qwertyuiop@#$")
+        driver.find_element(By.XPATH,"//button[@type='submit']").click()
+
+        print("login successful!")
+
+        # #Find and click the button
+        # button = WebDriverWait(driver, 20).until(
+        #     EC.element_to_be_clickable(
+        #         (By.XPATH, "//button[@data-qa-id='call_button']")
+        #     )
+        # )
+
+        # print("Button found!")
+
+        # driver.execute_script(
+        # "arguments[0].scrollIntoView({block: 'center'});",
+        # button
+        # )
+
+        # button.click()
+        # print("Button clicked!")
+
+        # Small additional wait for API/React rendering
+        # import time
+        time.sleep(30)
 
         html = driver.page_source
         print(f"Page loaded successfully: {url}")
@@ -86,39 +129,74 @@ def scrape_with_selenium(url: str):
 
 def selenium_scrape_articles_task(db: Session, url: str = None):
     print(f"Starting Selenium scraping for {url}...")
+
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     try:
         html = scrape_with_selenium(url)
+        # print(f"html-------------------------------------------{html}") 
 
-        if not html:
-            print(f"Selenium scraping failed for {url}.")
-            return
 
-        soup = BeautifulSoup(html, "html.parser")
-        extractor_func = get_extractor_for_url(url)
-        scraped_data = extractor_func(soup)
+        # response = requests.get(url, headers=headers, timeout=10)
+        # print(f"response.status_code--------------------{response.status_code}")
+        # if response.status_code != 200:
+        #     print(f"Skipping {url} - Status Code: {response.status_code}")
+        #     html = scrape_with_selenium(url)
+        #     if not html:
+        #         print(f"Selenium failed for {url}")
+        # else:
+        #     html = response.content 
 
-        if not scraped_data:
-            print(f"No data extracted from {url}")
-            return
+        # if not html:
+        #     print(f"Selenium scraping failed for {url}.")
+        #     return
 
-        # print(f"SCRAPED DATA-------------------------------------------{scraped_data}")
+        # soup = BeautifulSoup(html, "html.parser")
 
-        title = scraped_data.get("title")
-        image = scraped_data.get("image")
-        content = scraped_data.get("content")
+        # print(f"SOUP-------------------------------------------{soup}")
+        # extractor_func = get_extractor_for_url(url)
+        # scraped_data = extractor_func(soup)
+        # print(f"scraped_data-------------------------------------------{scraped_data}")
 
-        print(f"title--------------------{title}")
-        print(f"content------------------{content}")
-        print(f"image---------------------{image}")
+        # if not scraped_data:
+        #     print(f"No data extracted from {url}")
+        #     return
 
-        if not title:
-            print("WARNING: Title is empty")
-        if not content:
-            print("WARNING: Content is empty")
-        if not image:
-            print("WARNING: Image is empty")
+        # # print(f"SCRAPED DATA-------------------------------------------{scraped_data}")
+
+        # title = scraped_data.get("title")
+        # image = scraped_data.get("image")
+        # content = scraped_data.get("content")
+
+        # print(f"title--------------------{title}")
+        # print(f"content------------------{content}")
+        # print(f"image---------------------{image}")
+
+        # if not title:
+        #     print("WARNING: Title is empty")
+        # if not content:
+        #     print("WARNING: Content is empty")
+        # if not image:
+        #     print("WARNING: Image is empty")
 
         # Save to database here
+        # existing_content = db.query(Content).filter(Content.url_id == url).first()
+
+        # if existing_content: 
+        #     print(f"Content already exists for url_id={url}. Updating...") 
+        #     existing_content.title = title[:500] 
+        #     existing_content.body_description = content[:300] 
+        #     existing_content.body_text = content 
+        # else: 
+        #     print(f"Creating new Content for url_id={url}.") 
+        #     new_content = Content( 
+        #         url_id=url, 
+        #         title=title[:500], 
+        #         body_description=content[:300], 
+        #         body_text=content 
+        #     ) 
+        #     db.add(new_content) 
+        #     db.commit() 
+        #     print(f"Successfully saved content for {url}.")
 
     except Exception as e:
         db.rollback()
